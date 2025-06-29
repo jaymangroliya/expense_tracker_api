@@ -2,12 +2,13 @@ import { Router, Request, Response } from 'express';
 import Expense from '../models/Expense';
 import { requireRole } from '../middleware/role.middleware';
 import { createExpenseSchema, updateExpenseStatusSchema } from '../validations/expense.validation';
+import mongoose from 'mongoose';
 
 const router = Router();
 
-//----------------------------------------------
-// POST /api/expenses → Create a new expense
-//----------------------------------------------
+//--------------------------------------------------------------
+// POST /api/expenses → Create a new expense (Employee only)
+//--------------------------------------------------------------
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   const { error, value } = createExpenseSchema.validate(req.body);
 
@@ -25,13 +26,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-//------------------------------------------------
-// GET /api/expenses → Get expenses (self or all)
-//------------------------------------------------
+//--------------------------------------------------------------
+// GET /api/expenses → Get expenses (Admin gets all, Employee gets own)
+//--------------------------------------------------------------
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   const { role, userId } = req.query;
 
-  // Restrict by userId if role is not admin
   const filter = role === 'admin' ? {} : { userId };
 
   try {
@@ -43,21 +43,21 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-//-------------------------------------------------------
-// PATCH /api/expenses/:id → Approve or Reject expense
-//-------------------------------------------------------
-router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
-  const { error, value } = updateExpenseStatusSchema.validate(req.body);
+//--------------------------------------------------------------
+// PATCH /api/expenses/:id → Approve/Reject expense (Admin only)
+//--------------------------------------------------------------
+router.patch('/:id', requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+  const { status } = req.body;
 
-  if (error) {
-    res.status(400).json({ message: 'Invalid status value', details: error.details });
+  if (!['approved', 'rejected'].includes(status)) {
+    res.status(400).json({ message: 'Invalid status value' });
     return;
   }
 
   try {
     const updatedExpense = await Expense.findByIdAndUpdate(
       req.params.id,
-      { status: value.status },
+      { status },
       { new: true }
     );
 
@@ -68,14 +68,14 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
 
     res.json(updatedExpense);
   } catch (err) {
-    console.error('Error updating expense status:', err);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Error updating status:', err);
+    res.status(500).json({ message: 'Failed to update expense status' });
   }
 });
 
-//------------------------------------------------------
-// GET /api/expenses/analytics → Expenses per category
-//------------------------------------------------------
+//------------------------------------------------------------------
+// GET /api/expenses/analytics → Grouped expenses by category (Admin only)
+//------------------------------------------------------------------
 router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
   const { userId, role } = req.query;
 
@@ -84,7 +84,14 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const matchFilter = role === 'admin' ? {} : { userId };
+  let matchFilter: any;
+
+  try {
+    matchFilter = role === 'admin' ? {} : { userId: new mongoose.Types.ObjectId(userId as string) };
+  } catch (err) {
+    res.status(400).json({ message: 'Invalid userId format' });
+    return;
+  }
 
   try {
     const result = await Expense.aggregate([
@@ -93,13 +100,13 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
         $group: {
           _id: '$category',
           total: { $sum: '$amount' },
-        }
-      }
+        },
+      },
     ]);
 
-    res.json(result);
+    res.status(200).json(result);
   } catch (err) {
-    console.error('Analytics error:', err);
+    console.error('Error generating analytics:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -13,6 +13,7 @@ async function seedUsers() {
 
         const users = [
             { name: 'Alice Johnson', role: 'admin' },
+            { name: 'Joseph Chandler', role: 'admin' },
             { name: 'Bob Smith', role: 'employee' },
             { name: 'Catherine Lee', role: 'employee' },
             { name: 'Jeet Patel', role: 'employee' },
